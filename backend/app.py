@@ -83,6 +83,10 @@ def chat():
 @app.route("/analyze", methods=["POST"])
 def analyze():
 
+    import os
+    import joblib
+    import pandas as pd
+
     data = request.get_json()
 
     if not data or "event" not in data or "user_id" not in data:
@@ -93,6 +97,39 @@ def analyze():
     security_event = data["event"]
     user_id = data["user_id"]
 
+    
+
+    ml_result = None
+
+    if "features" in data:
+
+        model_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "ml",
+            "severity_model.pkl"
+        )
+
+        if not os.path.exists(model_path):
+            return jsonify({
+                "error": "Trained severity model not found"
+            }), 404
+
+        try:
+            model = joblib.load(model_path)
+
+            input_data = pd.DataFrame([data["features"]])
+
+            prediction = model.predict(input_data)[0]
+
+            ml_result = str(prediction)
+
+        except Exception as e:
+            return jsonify({
+                "error": "ML prediction failed",
+                "message": str(e)
+            }), 400
+
+    
     response = client.chat.completions.create(
         model="deepseek-ai/DeepSeek-V3.2",
         messages=[
@@ -120,6 +157,7 @@ def analyze():
 
     ai_result = response.choices[0].message.content
 
+
     connection = get_connection()
 
     connection.execute(
@@ -138,11 +176,19 @@ def analyze():
     connection.commit()
     connection.close()
 
-    return jsonify({
+    
+    result = {
         "event": security_event,
         "analysis": ai_result
-    })
+    }
 
+    if ml_result is not None:
+        result["ml_prediction"] = {
+            "severity": ml_result,
+            "model": "RandomForestClassifier"
+        }
+
+    return jsonify(result)
 
 
 @app.route("/events", methods=["GET"])
@@ -558,7 +604,98 @@ def get_incident(incident_id):
 
         "ai_analysis": ai_analysis
     })
+@app.route("/dataset/status", methods=["GET"])
+def dataset_status():
+    import os
+    import pandas as pd
 
+    dataset_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "dataset",
+        "cyber_investigation_master_10000.csv"
+    )
+
+    if not os.path.exists(dataset_path):
+        return {
+            "status": "error",
+            "message": "Dataset not found",
+            "path": dataset_path
+        }, 404
+
+    df = pd.read_csv(dataset_path)
+
+    return {
+        "status": "loaded",
+        "dataset": "cyber_investigation_master_10000.csv",
+        "rows": len(df),
+        "columns": len(df.columns),
+        "column_names": list(df.columns)
+    }
+@app.route("/dataset/sample", methods=["GET"])
+def dataset_sample():
+    import os
+    import pandas as pd
+
+    dataset_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "dataset",
+        "cyber_investigation_master_10000.csv"
+    )
+
+    if not os.path.exists(dataset_path):
+        return {
+            "status": "error",
+            "message": "Dataset not found"
+        }, 404
+
+    df = pd.read_csv(dataset_path)
+
+    return {
+        "status": "success",
+        "rows_returned": 5,
+        "data": df.head(5).to_dict(orient="records")
+    }
+@app.route("/ml/predict", methods=["POST"])
+def ml_predict():
+    import os
+    import joblib
+    import pandas as pd
+
+    model_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "ml",
+        "severity_model.pkl"
+    )
+
+    if not os.path.exists(model_path):
+        return jsonify({
+            "error": "Trained severity model not found"
+        }), 404
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "error": "Request body is required"
+        }), 400
+
+    try:
+        model = joblib.load(model_path)
+
+        input_data = pd.DataFrame([data])
+
+        prediction = model.predict(input_data)[0]
+
+        return jsonify({
+            "status": "success",
+            "predicted_severity": str(prediction)
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 400
 
 
 if __name__ == "__main__":
