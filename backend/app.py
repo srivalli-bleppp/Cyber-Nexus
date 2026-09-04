@@ -3,6 +3,7 @@ import sqlite3
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
 from openai import OpenAI
+from backend.database import get_connection
 
 load_dotenv()
 
@@ -195,9 +196,60 @@ def get_stats():
         "high": high_events,
         "critical": critical_events
     })
+@app.route("/users", methods=["GET"])
+def get_users():
+    connection = get_connection()
 
+    users = connection.execute(
+        "SELECT user_id, username, role, status FROM users"
+    ).fetchall()
+
+    connection.close()
+
+    return jsonify([
+        dict(user) for user in users
+    ])
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+
+    if not data or "username" not in data:
+        return jsonify({
+            "error": "Username is required"
+        }), 400
+
+    username = data["username"]
+
+    connection = get_connection()
+
+    user = connection.execute(
+        """
+        SELECT user_id, username, role, status
+        FROM users
+        WHERE username = ?
+        """,
+        (username,)
+    ).fetchone()
+
+    connection.close()
+
+    if not user:
+        return jsonify({
+            "error": "User not found"
+        }), 404
+
+    if user["status"] != "active":
+        return jsonify({
+            "error": "User is inactive"
+        }), 403
+
+    return jsonify({
+        "message": "Login successful",
+        "user": dict(user)
+    })
 if __name__ == "__main__":
     app.run(
+        host ="0.0.0.0",
         debug=True,
-        port=5000
+        port=8000
     )
